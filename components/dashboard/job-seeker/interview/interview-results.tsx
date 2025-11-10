@@ -47,6 +47,31 @@ export function InterviewResults({ interviewData, onRestart, onNewRole }: Interv
       setError(null)
       const result = await generateInterviewSummary(interviewData, interviewData.role, interviewData.level)
       setSummary(result)
+
+      // Save interview results to database
+      try {
+        const response = await fetch('/api/interview/save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            role: interviewData.role,
+            level: interviewData.level,
+            score: result.overallScore,
+            strengths: result.strengths,
+            improvements: result.improvements,
+            assessment_summary: result.summary,
+            transcript_summary: result.recommendation,
+            vapi_session_id: interviewData.sessionId || null
+          })
+        })
+
+        if (!response.ok) {
+          console.error('Failed to save interview results')
+        }
+      } catch (saveError) {
+        console.error('Error saving interview results:', saveError)
+        // Don't block the UI if save fails
+      }
     } catch (err) {
       console.error('Failed to generate summary:', err)
       setError('Failed to generate interview summary. Please try again.')

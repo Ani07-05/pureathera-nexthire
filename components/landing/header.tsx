@@ -11,10 +11,8 @@ export function Header() {
   const [isMenuOpen, setIsMenuOpen] = useState(false)
 
   const navItems = [
-    { label: "Platform", href: "#platform" },
     { label: "For Job Seekers", href: "/job-seeker" },
     { label: "For Recruiters", href: "/recruiter" },
-    { label: "About", href: "#about" },
   ]
 
   return (
@@ -63,13 +61,13 @@ export function Header() {
             className="flex items-center gap-4"
           >
             <ThemeToggle />
-            <Link href="/auth/login">
+            <Link href="/auth/login?type=candidate">
               <Button variant="outline" className="hidden md:inline-flex bg-transparent">
-                Sign In
+                Sign In (Candidate)
               </Button>
             </Link>
-            <Link href="/auth/signup">
-              <Button className="hidden md:inline-flex">Get Started</Button>
+            <Link href="/auth/login?type=recruiter">
+              <Button className="hidden md:inline-flex">Sign In (Recruiter)</Button>
             </Link>
 
             {/* Mobile menu button */}
@@ -100,17 +98,17 @@ export function Header() {
                     {item.label}
                   </a>
                 ))}
-                <div className="flex gap-2 pt-4">
-                  <Link href="/auth/login" className="flex-1">
-                    <Button variant="outline" size="sm" className="w-full bg-transparent">
-                      Sign In
-                    </Button>
-                  </Link>
-                  <Link href="/auth/signup" className="flex-1">
-                    <Button size="sm" className="w-full">
-                      Get Started
-                    </Button>
-                  </Link>
+                <div className="flex flex-col gap-2 pt-4">
+                <Link href="/auth/login?type=candidate" className="w-full">
+                <Button variant="outline" size="sm" className="w-full bg-transparent">
+                Sign In (Candidate)
+                </Button>
+                </Link>
+                <Link href="/auth/login?type=recruiter" className="w-full">
+                <Button size="sm" className="w-full">
+                Sign In (Recruiter)
+                </Button>
+                </Link>
                 </div>
               </nav>
             </motion.div>

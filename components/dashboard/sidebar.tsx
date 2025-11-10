@@ -4,6 +4,8 @@ import { Button } from "@/components/ui/button"
 import { ThemeToggle } from "@/components/theme-toggle"
 import { Home, BookOpen, ClipboardCheck, TrendingUp, MessageSquare, Settings, LogOut, User, Video } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { useEffect, useState } from "react"
+import { createClient } from "@/lib/supabase/client"
 
 interface SidebarProps {
   activeTab: string
@@ -12,6 +14,38 @@ interface SidebarProps {
 }
 
 export function Sidebar({ activeTab, onTabChange, userType }: SidebarProps) {
+  const [userName, setUserName] = useState<string | null>(null)
+  const [userRole, setUserRole] = useState<string | null>(null)
+
+  useEffect(() => {
+    const fetchUserData = async () => {
+      try {
+        const supabase = createClient()
+        const { data: { user }, error: authError } = await supabase.auth.getUser()
+
+        if (authError || !user) return
+
+        // Fetch user profile
+        const { data: profile } = await supabase
+          .from('candidate_profiles')
+          .select('full_name, target_role')
+          .eq('id', user.id)
+          .single()
+
+        if (profile) {
+          setUserName(profile.full_name || user.email?.split('@')[0] || 'User')
+          setUserRole(profile.target_role || 'Developer')
+        } else {
+          setUserName(user.email?.split('@')[0] || 'User')
+        }
+      } catch (error) {
+        console.error('Error fetching user data:', error)
+      }
+    }
+
+    fetchUserData()
+  }, [])
+
   const jobSeekerItems = [
     { id: "dashboard", label: "Dashboard", icon: Home },
     { id: "learning", label: "Learning Path", icon: BookOpen },
@@ -79,12 +113,12 @@ export function Sidebar({ activeTab, onTabChange, userType }: SidebarProps) {
         </div>
         <div className="flex items-center gap-3 p-3 bg-sidebar-accent text-sidebar-accent-foreground">
           <div className="w-8 h-8 bg-sidebar-primary text-sidebar-primary-foreground flex items-center justify-center font-semibold text-sm">
-            {userType === "job-seeker" ? "JS" : "RC"}
+            {userName?.substring(0, 2).toUpperCase() || "US"}
           </div>
           <div className="flex-1 min-w-0">
-            <p className="font-medium text-sm truncate">{userType === "job-seeker" ? "Raj Kumar" : "Ram Recruiter"}</p>
+            <p className="font-medium text-sm truncate">{userName || "Loading..."}</p>
             <p className="text-xs text-sidebar-accent-foreground/70 truncate">
-              {userType === "job-seeker" ? "Frontend Developer" : "Senior Recruiter"}
+              {userRole || "Developer"}
             </p>
           </div>
         </div>

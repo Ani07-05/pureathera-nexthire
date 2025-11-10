@@ -1,5 +1,6 @@
 "use client"
 
+import { useState, useEffect } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
@@ -16,103 +17,184 @@ import {
   Brain,
   Code,
   Users,
+  Loader2,
 } from "lucide-react"
 import { motion } from "framer-motion"
+import { GitHubProfileCard } from "./github-profile-card"
+
+interface CandidateProfile {
+  id: string
+  email: string
+  fullName: string | null
+  role: string
+  targetRole: string | null
+  experienceYears: number
+  skills: string[]
+  githubUsername: string | null
+  githubData: any
+  location: string | null
+  totalInterviews: number
+  avgScore: number
+  highestLevel: 'L1' | 'L2' | 'L3' | null
+  latestInterview: any
+  profileCompletion: number
+  createdAt: string
+  updatedAt: string
+}
 
 export function DashboardOverview() {
+  const [loading, setLoading] = useState(true)
+  const [profile, setProfile] = useState<CandidateProfile | null>(null)
+
+  useEffect(() => {
+    fetchProfile()
+  }, [])
+
+  const fetchProfile = async () => {
+    try {
+      setLoading(true)
+      const response = await fetch('/api/candidate/profile')
+
+      if (response.ok) {
+        const { data } = await response.json()
+        setProfile(data)
+      }
+    } catch (error) {
+      console.error('Error fetching profile:', error)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="space-y-6 grid-bg min-h-screen p-6 flex items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    )
+  }
+
+  if (!profile) {
+    return (
+      <div className="space-y-6 grid-bg min-h-screen p-6 flex items-center justify-center">
+        <Card>
+          <CardContent className="p-6">
+            <p className="text-muted-foreground">Failed to load profile data</p>
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
+  // Calculate hireability index based on real data
+  const hireabilityScore = Math.min(100, Math.round(
+    (profile.profileCompletion * 0.3) + // 30% profile completion
+    (profile.avgScore * 0.4) + // 40% interview performance
+    (profile.skills.length * 2) + // Skills contribution
+    (profile.githubData ? 15 : 0) // 15 points for GitHub
+  ))
+
+  const getHireabilityLevel = (score: number) => {
+    if (score >= 80) return "Job Ready"
+    if (score >= 60) return "Nearly Ready"
+    if (score >= 40) return "Building Skills"
+    return "Getting Started"
+  }
+
   const hireabilityIndex = {
-    score: 87,
-    level: "Job Ready",
-    improvement: "+12 points this month",
+    score: hireabilityScore,
+    level: getHireabilityLevel(hireabilityScore),
+    improvement: profile.totalInterviews > 0 ? `${profile.totalInterviews} interviews completed` : "Complete your first interview",
     breakdown: [
-      { skill: "Technical Skills", score: 92, color: "text-primary" },
-      { skill: "Communication", score: 85, color: "text-accent" },
-      { skill: "Problem Solving", score: 88, color: "text-chart-2" },
-      { skill: "Team Collaboration", score: 84, color: "text-chart-4" },
+      { skill: "Technical Skills", score: profile.skills.length > 5 ? 85 : profile.skills.length * 10, color: "text-primary" },
+      { skill: "Interview Score", score: profile.avgScore || 0, color: "text-accent" },
+      { skill: "Profile Completion", score: profile.profileCompletion, color: "text-chart-2" },
+      { skill: "GitHub Portfolio", score: profile.githubData ? 90 : 0, color: "text-chart-4" },
     ],
   }
 
   const stats = [
     {
-      title: "Skill Level",
-      value: "Advanced",
-      progress: 87,
+      title: "Experience Level",
+      value: profile.highestLevel || "Not assessed",
+      progress: profile.highestLevel ? (profile.highestLevel === 'L3' ? 100 : profile.highestLevel === 'L2' ? 66 : 33) : 0,
       icon: TrendingUp,
       color: "text-primary",
     },
     {
-      title: "Courses Completed",
-      value: "15/18",
-      progress: 83,
+      title: "Skills Verified",
+      value: `${profile.skills.length}`,
+      progress: Math.min(100, profile.skills.length * 10),
       icon: BookOpen,
       color: "text-accent",
     },
     {
-      title: "Assessments Passed",
-      value: "9/10",
-      progress: 90,
+      title: "Interviews Completed",
+      value: `${profile.totalInterviews}`,
+      progress: Math.min(100, profile.totalInterviews * 20),
       icon: ClipboardCheck,
       color: "text-chart-2",
     },
     {
-      title: "Job Applications",
-      value: "23",
-      progress: 76,
+      title: "Avg Interview Score",
+      value: profile.avgScore > 0 ? `${profile.avgScore}%` : "N/A",
+      progress: profile.avgScore || 0,
       icon: Target,
       color: "text-chart-4",
     },
   ]
 
-  const recentActivities = [
+  const recentActivities = profile.latestInterview ? [
     {
-      title: "Completed Advanced React Patterns",
-      time: "2 hours ago",
-      badge: "Completed",
-      impact: "+3 Hireability Points",
-    },
-    {
-      title: "JavaScript Assessment - Score: 94%",
-      time: "1 day ago",
-      badge: "Excellent",
-      impact: "+5 Hireability Points",
-    },
-    {
-      title: "Applied to Senior Frontend at TechCorp",
-      time: "2 days ago",
-      badge: "Pending",
-      impact: "Profile Viewed 12 times",
-    },
-  ]
+      title: `${profile.latestInterview.role} Interview - ${profile.latestInterview.level}`,
+      time: new Date(profile.latestInterview.created_at).toLocaleDateString(),
+      badge: profile.latestInterview.score >= 80 ? "Excellent" : profile.latestInterview.score >= 60 ? "Good" : "Completed",
+      impact: `Score: ${profile.latestInterview.score}%`,
+    }
+  ] : []
 
   const recommendations = [
     {
-      title: "Complete System Design Course",
-      description: "Boost your hireability by +8 points",
-      progress: 0,
-      estimatedTime: "6 hours",
+      title: profile.totalInterviews === 0 ? "Take Your First Interview" : "Take Another Interview",
+      description: profile.totalInterviews === 0 ? "Complete an AI interview to get assessed" : "Improve your interview score",
+      progress: profile.totalInterviews > 0 ? 50 : 0,
+      estimatedTime: "20-30 minutes",
       priority: "High Impact",
     },
     {
-      title: "Practice Coding Interviews",
-      description: "Improve problem-solving score",
-      progress: 25,
-      estimatedTime: "2 hours",
-      priority: "Quick Win",
+      title: profile.githubData ? "Update GitHub Portfolio" : "Connect GitHub Account",
+      description: profile.githubData ? "Keep your projects up to date" : "Verify your technical skills",
+      progress: profile.githubData ? 75 : 0,
+      estimatedTime: profile.githubData ? "2 hours" : "5 minutes",
+      priority: profile.githubData ? "Medium" : "Quick Win",
     },
     {
-      title: "Update Portfolio Projects",
-      description: "Showcase recent learnings",
-      progress: 60,
-      estimatedTime: "3 hours",
-      priority: "Medium",
+      title: "Complete Your Profile",
+      description: "Add missing information to boost visibility",
+      progress: profile.profileCompletion,
+      estimatedTime: "10 minutes",
+      priority: profile.profileCompletion < 100 ? "Quick Win" : "Completed",
     },
   ]
+
+  const getInitials = (name: string | null) => {
+    if (!name) return "?"
+    return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
+  }
+
+  const firstName = profile.fullName?.split(' ')[0] || 'there'
 
   return (
     <div className="space-y-6 grid-bg min-h-screen p-6">
       <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6 }}>
-        <h1 className="text-3xl font-bold mb-2">Welcome back, Raj!</h1>
-        <p className="text-muted-foreground">Your hireability index shows you're ready for senior roles</p>
+        <h1 className="text-3xl font-bold mb-2">Welcome back, {firstName}!</h1>
+        <p className="text-muted-foreground">
+          {hireabilityScore >= 80
+            ? "Your profile shows you're ready for opportunities"
+            : hireabilityScore >= 60
+            ? "You're making great progress towards being job-ready"
+            : "Complete your profile and interviews to boost your hireability"}
+        </p>
       </motion.div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
@@ -133,18 +215,23 @@ export function DashboardOverview() {
             <CardContent className="space-y-4">
               <div className="text-center">
                 <div className="w-20 h-20 bg-primary/10 rounded-full flex items-center justify-center mx-auto mb-4">
-                  <span className="text-2xl font-bold text-primary">RK</span>
+                  <span className="text-2xl font-bold text-primary">{getInitials(profile.fullName)}</span>
                 </div>
-                <h3 className="font-semibold">Raj Kumar</h3>
-                <p className="text-sm text-muted-foreground">Frontend Developer</p>
-                <Badge className="mt-2">3+ Years Experience</Badge>
+                <h3 className="font-semibold">{profile.fullName || 'Anonymous User'}</h3>
+                <p className="text-sm text-muted-foreground">{profile.targetRole || 'Job Seeker'}</p>
+                {profile.experienceYears > 0 && (
+                  <Badge className="mt-2">{profile.experienceYears}+ Years Experience</Badge>
+                )}
+                {profile.experienceYears === 0 && (
+                  <Badge variant="outline" className="mt-2">Entry Level</Badge>
+                )}
               </div>
               <div className="space-y-3">
                 <div className="flex justify-between text-sm">
                   <span>Profile Completion</span>
-                  <span className="font-medium">92%</span>
+                  <span className="font-medium">{profile.profileCompletion}%</span>
                 </div>
-                <Progress value={92} className="h-2" />
+                <Progress value={profile.profileCompletion} className="h-2" />
               </div>
             </CardContent>
           </Card>
@@ -236,6 +323,15 @@ export function DashboardOverview() {
         </motion.div>
       </div>
 
+      {/* GitHub Profile Card */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.6, delay: 0.35 }}
+      >
+        <GitHubProfileCard />
+      </motion.div>
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Recent Activity */}
         <motion.div
@@ -251,32 +347,40 @@ export function DashboardOverview() {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="space-y-4">
-                {recentActivities.map((activity, index) => (
-                  <div
-                    key={index}
-                    className="flex items-start gap-3 p-3 hover:bg-muted/50 transition-colors border border-border/50"
-                  >
-                    <div className="w-2 h-2 bg-primary rounded-full mt-2 flex-shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <p className="font-medium text-sm">{activity.title}</p>
-                      <p className="text-xs text-muted-foreground">{activity.time}</p>
-                      <p className="text-xs text-primary font-medium mt-1">{activity.impact}</p>
-                    </div>
-                    <Badge
-                      variant={
-                        activity.badge === "Completed"
-                          ? "default"
-                          : activity.badge === "Excellent"
-                            ? "secondary"
-                            : "outline"
-                      }
+              {recentActivities.length > 0 ? (
+                <div className="space-y-4">
+                  {recentActivities.map((activity, index) => (
+                    <div
+                      key={index}
+                      className="flex items-start gap-3 p-3 hover:bg-muted/50 transition-colors border border-border/50"
                     >
-                      {activity.badge}
-                    </Badge>
-                  </div>
-                ))}
-              </div>
+                      <div className="w-2 h-2 bg-primary rounded-full mt-2 flex-shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium text-sm">{activity.title}</p>
+                        <p className="text-xs text-muted-foreground">{activity.time}</p>
+                        <p className="text-xs text-primary font-medium mt-1">{activity.impact}</p>
+                      </div>
+                      <Badge
+                        variant={
+                          activity.badge === "Completed"
+                            ? "default"
+                            : activity.badge === "Excellent"
+                              ? "secondary"
+                              : "outline"
+                        }
+                      >
+                        {activity.badge}
+                      </Badge>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-8 text-muted-foreground">
+                  <ClipboardCheck className="h-12 w-12 mx-auto mb-3 opacity-50" />
+                  <p className="text-sm">No recent activity yet</p>
+                  <p className="text-xs mt-1">Complete an interview to get started</p>
+                </div>
+              )}
             </CardContent>
           </Card>
         </motion.div>

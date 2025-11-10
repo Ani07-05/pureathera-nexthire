@@ -1,13 +1,13 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
-import { Mic, MicOff, Video, VideoOff, Phone, PhoneOff, MessageSquare, Monitor, MonitorStop } from "lucide-react"
+import { Mic, MicOff, Phone, PhoneOff, Radio, Sparkles, ArrowLeft } from "lucide-react"
 import { motion, AnimatePresence } from "framer-motion"
-import { InterviewAnamClient } from "@/lib/anam-client-new"
+import { InterviewVapiClient } from "@/lib/vapi-client"
 import {
   AssessmentResult,
   InterviewQuestion,
@@ -27,31 +27,28 @@ interface InterviewRoomProps {
 }
 
 export function InterviewRoom({ role, assessmentResult, onComplete, onBack }: InterviewRoomProps) {
-  const videoRef = useRef<HTMLVideoElement>(null)
-  const [anamClient, setAnamClient] = useState<InterviewAnamClient | null>(null)
+  const [vapiClient, setVapiClient] = useState<InterviewVapiClient | null>(null)
   const [isConnected, setIsConnected] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
-  const [isMicOn, setIsMicOn] = useState(false)
-  const [isVideoOn, setIsVideoOn] = useState(true)
+  const [isSpeaking, setIsSpeaking] = useState(false)
   const [questions, setQuestions] = useState<InterviewQuestion[]>([])
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0)
   const [interviewStarted, setInterviewStarted] = useState(false)
   const [feedback, setFeedback] = useState<InterviewFeedback[]>([])
-  const [currentAnswer, setCurrentAnswer] = useState("")
-  const [isListening, setIsListening] = useState(false)
   const [sessionId, setSessionId] = useState<string>("")
+  const [assistantId, setAssistantId] = useState<string>("")
   const [error, setError] = useState<string | null>(null)
-  const [isScreenSharing, setIsScreenSharing] = useState(false)
-  const [screenStream, setScreenStream] = useState<MediaStream | null>(null)
+  const [transcript, setTranscript] = useState<string[]>([])
+  const [interviewDuration, setInterviewDuration] = useState(0)
 
   useEffect(() => {
     let isMounted = true
     let timeoutId: NodeJS.Timeout
+    let durationInterval: NodeJS.Timeout
 
     const initialize = async () => {
-      // Add delay to avoid hot reload interruptions
       timeoutId = setTimeout(async () => {
-        if (isMounted && !isConnected && !anamClient) {
+        if (isMounted && !isConnected && !vapiClient) {
           await initializeInterview()
         }
       }, 500)
@@ -59,17 +56,24 @@ export function InterviewRoom({ role, assessmentResult, onComplete, onBack }: In
 
     initialize()
 
+    // Duration counter
+    durationInterval = setInterval(() => {
+      if (interviewStarted) {
+        setInterviewDuration(prev => prev + 1)
+      }
+    }, 1000)
+
     return () => {
       isMounted = false
       if (timeoutId) clearTimeout(timeoutId)
+      if (durationInterval) clearInterval(durationInterval)
       cleanup()
     }
-  }, []) // Only run once on mount
+  }, [])
 
   const initializeInterview = async () => {
-    // Prevent multiple initializations
-    if (isConnected || anamClient) {
-      console.log('Interview already initialized or initializing, skipping...')
+    if (isConnected || vapiClient) {
+      console.log('Interview already initialized, skipping...')
       return
     }
 
@@ -84,85 +88,66 @@ export function InterviewRoom({ role, assessmentResult, onComplete, onBack }: In
       setQuestions(interviewQuestions)
       console.log('Step 1: Questions generated:', interviewQuestions.length)
 
-      // Create Anam.ai session token
-      console.log('Step 2: Creating Anam session...')
+      // Create Vapi session (creates assistant)
+      console.log('Step 2: Creating Vapi session...')
       const sessionData = await createInterviewSession("user-123", role, assessmentResult.level)
       setSessionId(sessionData.sessionId)
-      console.log('Step 2: Session created with token')
+      setAssistantId(sessionData.assistantId)
+      console.log('Step 2: Session created with assistant:', sessionData.assistantId)
 
-      // Initialize Anam client
-      console.log('Step 3: Creating Anam client...')
-      const client = new InterviewAnamClient(sessionData.sessionToken, {
-        onConnect: () => {
-          console.log('Anam client connected successfully!')
-          setIsConnected(true)
-          setIsLoading(false)
-        },
-        onDisconnect: () => {
-          console.log('Anam client disconnected')
-          setIsConnected(false)
-        },
-        onMessage: (message) => {
-          console.log('Received message from AI:', message)
-        },
-        onError: (error) => {
-          console.error('Anam client error:', error)
-          setError('Connection error. Please try again.')
-          setIsLoading(false)
-        }
-      })
+      // Initialize Vapi client
+      console.log('Step 3: Creating Vapi client...')
+      const client = new InterviewVapiClient(
+        sessionData.publicKey,
+        sessionData.assistantId,
+        assessmentResult,
+        role,
+        {
+          onCallStart: () => {
+            console.log('Vapi call started')
+            setIsConnected(true)
+            setIsLoading(false)
+            setInterviewStarted(true)
+          },
+          onCallEnd: () => {
+            console.log('Vapi call ended')
+            setIsConnected(false)
+            setInterviewStarted(false)
+          },
+          onSpeechStart: () => {
+            console.log('AI started speaking')
+            setIsSpeaking(true)
+          },
+          onSpeechEnd: () => {
+            console.log('AI stopped speaking')
+            setIsSpeaking(false)
+          },
+          onMessage: (message) => {
+            console.log('Received message from AI:', message)
 
-      console.log('Step 4: Initializing Anam client...')
-      await client.initialize()
-      console.log('Step 4: Anam client initialized')
-      setAnamClient(client)
+            // Handle transcript updates
+            if (message.type === 'transcript' && message.transcript) {
+              setTranscript(prev => [...prev, message.transcript])
+            }
 
-      // Wait for video element to be properly mounted in DOM
-      console.log('Step 5: Looking for video element...')
-      let videoElement = videoRef.current
-      let attempts = 0
-      while (!videoElement && attempts < 10) {
-        console.log(`Step 5: Video element attempt ${attempts + 1}/10`)
-        await new Promise(resolve => setTimeout(resolve, 200))
-        videoElement = videoRef.current
-        attempts++
-      }
-      console.log('Step 5: Video element search completed, found:', !!videoElement)
-
-      if (videoElement) {
-        // Make sure video element has an ID
-        if (!videoElement.id) {
-          videoElement.id = `interview-video-${Date.now()}`
-        }
-
-        // Force DOM update
-        videoElement.style.display = 'block'
-
-        // Wait for element to be fully in DOM and force a reflow
-        await new Promise(resolve => setTimeout(resolve, 1000))
-
-        // Force a style update to ensure element is rendered
-        videoElement.style.width = '320px'
-        videoElement.style.height = '240px'
-        videoElement.style.background = '#000000'
-
-        // Verify element exists in DOM
-        const domElement = document.getElementById(videoElement.id)
-        if (domElement) {
-          console.log('Video element found, starting stream...')
-          try {
-            await client.streamToVideo(videoElement)
-            console.log('Stream started successfully')
-          } catch (streamError) {
-            console.warn('Stream setup failed, continuing with audio-only mode:', streamError)
-            // Continue anyway - the interview can work without video
+            // Handle conversation messages
+            if (message.type === 'conversation-update') {
+              console.log('Conversation update:', message)
+            }
+          },
+          onError: (error) => {
+            console.error('Vapi client error:', error)
+            setError('Connection error. Please try again.')
+            setIsLoading(false)
           }
-        } else {
-          console.warn('Video element not found in DOM, continuing without video')
         }
-      } else {
-        console.warn('Video element not available, continuing without video')
-      }
+      )
+
+      console.log('Step 4: Initializing Vapi client...')
+      await client.initialize()
+      console.log('Step 4: Vapi client initialized')
+      setVapiClient(client)
+      setIsLoading(false)
 
     } catch (err) {
       console.error('Failed to initialize interview:', err)
@@ -173,209 +158,80 @@ export function InterviewRoom({ role, assessmentResult, onComplete, onBack }: In
 
   const cleanup = async () => {
     try {
-      if (anamClient) {
-        await anamClient.stopStreaming()
+      if (vapiClient) {
+        await vapiClient.stopInterview()
+        vapiClient.destroy()
       }
       if (sessionId) {
         await endInterviewSession(sessionId)
-      }
-      if (screenStream) {
-        screenStream.getTracks().forEach(track => track.stop())
-        setScreenStream(null)
-        setIsScreenSharing(false)
       }
     } catch (error) {
       console.log('Cleanup error:', error)
     }
   }
 
-  const enableAudio = async () => {
-    if (videoRef.current) {
-      try {
-        console.log('Enabling audio...')
-        videoRef.current.muted = false
-        videoRef.current.volume = 1.0
-
-        // Try to play the video to trigger audio context
-        await videoRef.current.play()
-        console.log('Audio enabled successfully')
-      } catch (err) {
-        console.error('Failed to enable audio:', err)
-      }
-    }
-  }
-
-  const testConnection = async () => {
-    if (!anamClient || !isConnected) {
-      console.log('Client not ready for test')
+  const startInterview = async () => {
+    if (!vapiClient) {
+      setError('Client not initialized. Please refresh and try again.')
       return
     }
 
     try {
-      // Just enable audio without making avatar talk
-      await enableAudio()
-      console.log('Audio test completed - avatar ready but silent until interview starts')
-    } catch (err) {
-      console.error('Failed to test connection:', err)
-      setError('Connection test failed.')
-    }
-  }
-
-  const startInterview = async () => {
-    if (!anamClient || !isConnected) return
-
-    try {
-      // Enable audio first
-      await enableAudio()
-
-      setInterviewStarted(true)
-
-      // Start with a greeting and then first question
-      await anamClient.setupInterviewContext(role, assessmentResult.level)
-
-      // Small delay before first question
-      await new Promise(resolve => setTimeout(resolve, 2000))
-
-      const firstQuestion = questions[0]
-      await anamClient.askQuestion(firstQuestion.question)
+      console.log('Starting Vapi interview...')
+      await vapiClient.startInterview()
+      // The onCallStart callback will set interviewStarted to true
     } catch (err) {
       console.error('Failed to start interview:', err)
-      setError('Failed to start interview question.')
-    }
-  }
-
-  const toggleMic = async () => {
-    if (!anamClient) return
-
-    try {
-      if (isMicOn) {
-        // For now, just toggle the state - audio input is handled by the stream
-        setIsListening(false)
-      } else {
-        setIsListening(true)
-      }
-      setIsMicOn(!isMicOn)
-    } catch (err) {
-      console.error('Failed to toggle microphone:', err)
-    }
-  }
-
-  const startScreenShare = async () => {
-    try {
-      console.log('Starting screen share...')
-      const stream = await navigator.mediaDevices.getDisplayMedia({
-        video: true,
-        audio: true
-      })
-
-      setScreenStream(stream)
-      setIsScreenSharing(true)
-
-      // Notify the interviewer that screen sharing has started
-      if (anamClient) {
-        await anamClient.talk("I can see you've started screen sharing. This is perfect for technical questions where you need to show code or solve problems. Please go ahead and show me what you're working on.")
-      }
-
-      // Listen for when user stops sharing
-      stream.getVideoTracks()[0].addEventListener('ended', () => {
-        stopScreenShare()
-      })
-
-    } catch (err) {
-      console.error('Failed to start screen sharing:', err)
-      setError('Failed to start screen sharing. Please make sure you grant permission.')
-    }
-  }
-
-  const stopScreenShare = async () => {
-    try {
-      console.log('Stopping screen share...')
-
-      if (screenStream) {
-        screenStream.getTracks().forEach(track => track.stop())
-        setScreenStream(null)
-      }
-
-      setIsScreenSharing(false)
-
-      // Notify the interviewer that screen sharing has stopped
-      if (anamClient) {
-        await anamClient.talk("Screen sharing has ended. Let's continue with the interview.")
-      }
-
-    } catch (err) {
-      console.error('Failed to stop screen sharing:', err)
-    }
-  }
-
-  const nextQuestion = async () => {
-    if (currentQuestionIndex < questions.length - 1) {
-      // Get feedback for current answer
-      if (currentAnswer.trim()) {
-        try {
-          const feedbackResult = await getFeedback(
-            questions[currentQuestionIndex].question,
-            currentAnswer,
-            role,
-            assessmentResult.level,
-            questions[currentQuestionIndex].category
-          )
-          setFeedback(prev => [...prev, feedbackResult])
-
-          // Provide feedback through Azure
-          if (anamClient) {
-            await anamClient.provideFeedback(feedbackResult.feedback)
-          }
-        } catch (err) {
-          console.error('Failed to get feedback:', err)
-        }
-      }
-
-      // Move to next question
-      const nextIndex = currentQuestionIndex + 1
-      setCurrentQuestionIndex(nextIndex)
-      setCurrentAnswer("")
-
-      if (anamClient && questions[nextIndex]) {
-        await anamClient.askQuestion(questions[nextIndex].question)
-      }
+      setError('Failed to start interview. Please check your microphone permissions.')
     }
   }
 
   const endInterview = async () => {
-    try {
-      // Get final feedback if there's a current answer
-      if (currentAnswer.trim()) {
-        const feedbackResult = await getFeedback(
-          questions[currentQuestionIndex].question,
-          currentAnswer,
-          role,
-          assessmentResult.level,
-          questions[currentQuestionIndex].category
-        )
-        setFeedback(prev => [...prev, feedbackResult])
-      }
+    if (!vapiClient) return
 
-      // Compile interview data
+    try {
+      console.log('Ending interview...')
+      await vapiClient.stopInterview()
+
+      // Collect interview data for results
       const interviewData = {
         role,
         level: assessmentResult.level,
-        questions,
-        feedback,
-        answers: questions.map((q, index) => ({
-          questionId: q.id,
-          question: q.question,
-          answer: index === currentQuestionIndex ? currentAnswer : "",
-          category: q.category
-        }))
+        duration: interviewDuration,
+        questionsAsked: questions.length,
+        transcript,
+        feedback
       }
 
-      await cleanup()
       onComplete(interviewData)
     } catch (err) {
       console.error('Failed to end interview:', err)
       setError('Failed to end interview properly.')
     }
+  }
+
+  const formatTime = (seconds: number): string => {
+    const mins = Math.floor(seconds / 60)
+    const secs = seconds % 60
+    return `${mins}:${secs.toString().padStart(2, '0')}`
+  }
+
+  if (isLoading) {
+    return (
+      <div className="max-w-4xl mx-auto p-6">
+        <Card>
+          <CardContent className="flex items-center justify-center p-12">
+            <div className="text-center space-y-4">
+              <Sparkles className="h-12 w-12 animate-pulse text-primary mx-auto" />
+              <h3 className="text-lg font-medium">Preparing Your Interview</h3>
+              <p className="text-muted-foreground">
+                Setting up AI interviewer for {role} - {assessmentResult.level}...
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    )
   }
 
   if (error) {
@@ -387,9 +243,10 @@ export function InterviewRoom({ role, assessmentResult, onComplete, onBack }: In
             <p className="text-muted-foreground mb-4">{error}</p>
             <div className="space-x-2">
               <Button onClick={onBack} variant="outline">
+                <ArrowLeft className="mr-2 h-4 w-4" />
                 Go Back
               </Button>
-              <Button onClick={initializeInterview}>
+              <Button onClick={() => window.location.reload()}>
                 Try Again
               </Button>
             </div>
@@ -398,9 +255,6 @@ export function InterviewRoom({ role, assessmentResult, onComplete, onBack }: In
       </div>
     )
   }
-
-  const progress = ((currentQuestionIndex + 1) / questions.length) * 100
-  const currentQuestion = questions[currentQuestionIndex]
 
   return (
     <div className="max-w-6xl mx-auto p-6 space-y-6">
@@ -411,229 +265,203 @@ export function InterviewRoom({ role, assessmentResult, onComplete, onBack }: In
         className="flex items-center justify-between"
       >
         <div className="flex items-center gap-3">
-          <Button onClick={onBack} variant="ghost">
-            ← Back
+          <Button onClick={onBack} variant="ghost" size="sm" disabled={interviewStarted}>
+            <ArrowLeft className="h-4 w-4 mr-2" />
+            Back
           </Button>
-          <div>
-            <h1 className="text-2xl font-bold">AI Interview</h1>
-            <p className="text-muted-foreground">{role}</p>
-          </div>
+          <Badge variant="outline" className="gap-2">
+            <Radio className="h-3 w-3" />
+            {role} Interview
+          </Badge>
+          <Badge variant={assessmentResult.level === 'L1' ? 'secondary' : assessmentResult.level === 'L2' ? 'default' : 'destructive'}>
+            {levelDescriptions[assessmentResult.level].title}
+          </Badge>
         </div>
-        <Badge variant={assessmentResult.level === 'L1' ? 'secondary' : assessmentResult.level === 'L2' ? 'default' : 'destructive'}>
-          {levelDescriptions[assessmentResult.level].title}
-        </Badge>
+        {interviewStarted && (
+          <div className="text-sm text-muted-foreground flex items-center gap-2">
+            <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse" />
+            Duration: {formatTime(interviewDuration)}
+          </div>
+        )}
       </motion.div>
 
-      {/* Progress */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.1 }}
-      >
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-sm font-medium">Interview Progress</span>
-              <span className="text-sm text-muted-foreground">
-                {currentQuestionIndex + 1} of {questions.length}
-              </span>
-            </div>
-            <Progress value={progress} />
-          </CardContent>
-        </Card>
-      </motion.div>
+      {/* Main Interview Area */}
+      <div className="grid md:grid-cols-3 gap-6">
+        {/* Left: Voice Interface */}
+        <div className="md:col-span-2 space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Sparkles className="h-5 w-5" />
+                AI Voice Interview
+              </CardTitle>
+              <CardDescription>
+                Speak naturally with the AI interviewer. Your responses will be evaluated in real-time.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {/* Voice Visualization */}
+              <div className="relative h-64 bg-gradient-to-br from-blue-50 to-purple-50 dark:from-blue-950 dark:to-purple-950 rounded-lg flex items-center justify-center overflow-hidden">
+                <AnimatePresence>
+                  {isSpeaking ? (
+                    <motion.div
+                      initial={{ scale: 0.8, opacity: 0 }}
+                      animate={{ scale: 1, opacity: 1 }}
+                      exit={{ scale: 0.8, opacity: 0 }}
+                      className="text-center"
+                    >
+                      <motion.div
+                        animate={{
+                          scale: [1, 1.2, 1],
+                        }}
+                        transition={{
+                          duration: 1.5,
+                          repeat: Infinity,
+                          ease: "easeInOut"
+                        }}
+                        className="w-24 h-24 bg-primary/20 rounded-full flex items-center justify-center mx-auto mb-4"
+                      >
+                        <Mic className="h-12 w-12 text-primary" />
+                      </motion.div>
+                      <p className="text-lg font-medium text-primary">AI is speaking...</p>
+                    </motion.div>
+                  ) : interviewStarted ? (
+                    <motion.div
+                      initial={{ scale: 0.8, opacity: 0 }}
+                      animate={{ scale: 1, opacity: 1 }}
+                      className="text-center"
+                    >
+                      <div className="w-24 h-24 bg-green-100 dark:bg-green-900 rounded-full flex items-center justify-center mx-auto mb-4">
+                        <Mic className="h-12 w-12 text-green-600 dark:text-green-400" />
+                      </div>
+                      <p className="text-lg font-medium">Listening to your response...</p>
+                    </motion.div>
+                  ) : (
+                    <div className="text-center">
+                      <div className="w-24 h-24 bg-gray-100 dark:bg-gray-800 rounded-full flex items-center justify-center mx-auto mb-4">
+                        <Phone className="h-12 w-12 text-gray-400" />
+                      </div>
+                      <p className="text-lg font-medium mb-2">Ready to Start</p>
+                      <p className="text-sm text-muted-foreground">Click "Start Interview" to begin</p>
+                    </div>
+                  )}
+                </AnimatePresence>
+              </div>
 
-      {/* Full Screen Video Section */}
-      <motion.div
-        initial={{ opacity: 0, scale: 0.95 }}
-        animate={{ opacity: 1, scale: 1 }}
-        transition={{ delay: 0.2 }}
-        className="mb-6"
-      >
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Video className="h-5 w-5" />
-              AI Interviewer
-            </CardTitle>
-            <CardDescription>
-              {isLoading ? 'Connecting to AI interviewer...' :
-               isConnected ? 'Connected and ready' : 'Disconnected'}
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="relative bg-gray-900 rounded-lg overflow-hidden" style={{ height: '70vh' }}>
-              <video
-                ref={videoRef}
-                autoPlay
-                playsInline
-                muted={false}
-                className="w-full h-full object-cover"
-                style={{ backgroundColor: '#000' }}
-              />
-              {isLoading && (
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <div className="text-white text-center">
-                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white mx-auto mb-2"></div>
-                    <p>Connecting...</p>
+              {/* Controls */}
+              <div className="flex justify-center gap-4">
+                {!interviewStarted ? (
+                  <Button
+                    onClick={startInterview}
+                    disabled={!vapiClient || isConnected}
+                    size="lg"
+                    className="gap-2"
+                  >
+                    <Phone className="h-5 w-5" />
+                    Start Interview
+                  </Button>
+                ) : (
+                  <Button
+                    onClick={endInterview}
+                    variant="destructive"
+                    size="lg"
+                    className="gap-2"
+                  >
+                    <PhoneOff className="h-5 w-5" />
+                    End Interview
+                  </Button>
+                )}
+              </div>
+
+              {/* Status */}
+              {isConnected && (
+                <div className="text-center text-sm text-muted-foreground">
+                  <div className="flex items-center justify-center gap-2">
+                    <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
+                    Connected to AI Interviewer
                   </div>
                 </div>
               )}
-            </div>
+            </CardContent>
+          </Card>
 
-                {/* Controls */}
-                <div className="flex items-center justify-center gap-4 mt-4">
-                  <Button
-                    onClick={toggleMic}
-                    variant={isMicOn ? "default" : "outline"}
-                    size="icon"
-                    disabled={!isConnected}
-                  >
-                    {isMicOn ? <Mic className="h-4 w-4" /> : <MicOff className="h-4 w-4" />}
-                  </Button>
-
-                  <Button
-                    onClick={isVideoOn ? () => setIsVideoOn(false) : () => setIsVideoOn(true)}
-                    variant={isVideoOn ? "default" : "outline"}
-                    size="icon"
-                    disabled={!isConnected}
-                  >
-                    {isVideoOn ? <Video className="h-4 w-4" /> : <VideoOff className="h-4 w-4" />}
-                  </Button>
-
-                  <Button
-                    onClick={isScreenSharing ? stopScreenShare : startScreenShare}
-                    variant={isScreenSharing ? "default" : "outline"}
-                    size="icon"
-                    disabled={!interviewStarted}
-                    title={isScreenSharing ? "Stop Screen Share" : "Start Screen Share"}
-                  >
-                    {isScreenSharing ? <MonitorStop className="h-4 w-4" /> : <Monitor className="h-4 w-4" />}
-                  </Button>
-
-                  {!interviewStarted ? (
-                    <>
-                      <Button
-                        onClick={enableAudio}
-                        variant="outline"
-                        size="sm"
-                      >
-                        🔊 Enable Audio
-                      </Button>
-                      <Button
-                        onClick={testConnection}
-                        disabled={!isConnected || isLoading}
-                        variant="outline"
-                        size="sm"
-                      >
-                        Test Audio
-                      </Button>
-                      <Button
-                        onClick={startInterview}
-                        disabled={!isConnected || isLoading}
-                        className="gap-2"
-                      >
-                        <Phone className="h-4 w-4" />
-                        Start Interview
-                      </Button>
-                    </>
-                  ) : (
-                    <Button
-                      onClick={endInterview}
-                      variant="destructive"
-                      className="gap-2"
-                    >
-                      <PhoneOff className="h-4 w-4" />
-                      End Interview
-                    </Button>
-                  )}
-            </div>
-          </CardContent>
-        </Card>
-      </motion.div>
-
-      {/* Controls and Question Section */}
-      <div className="grid lg:grid-cols-2 gap-6">
-        {/* Question Section */}
-        <div>
-          {interviewStarted && currentQuestion && (
-            <motion.div
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: 0.3 }}
-            >
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <MessageSquare className="h-5 w-5" />
-                    Current Question
-                  </CardTitle>
-                  <Badge variant="outline">{currentQuestion.category}</Badge>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-sm mb-4">{currentQuestion.question}</p>
-                  <textarea
-                    value={currentAnswer}
-                    onChange={(e) => setCurrentAnswer(e.target.value)}
-                    placeholder="Take notes or type your answer here..."
-                    className="w-full h-24 p-2 border rounded text-sm"
-                  />
-                  <div className="flex gap-2 mt-4">
-                    {currentQuestionIndex < questions.length - 1 ? (
-                      <Button onClick={nextQuestion} size="sm" className="w-full">
-                        Next Question
-                      </Button>
-                    ) : (
-                      <Button onClick={endInterview} size="sm" variant="destructive" className="w-full">
-                        Complete Interview
-                      </Button>
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
-            </motion.div>
-          )}
-        </div>
-
-        {/* Status Section */}
-        <div>
-          <motion.div
-            initial={{ opacity: 0, x: 20 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: 0.4 }}
-          >
+          {/* Transcript */}
+          {transcript.length > 0 && (
             <Card>
               <CardHeader>
-                <CardTitle>Status</CardTitle>
+                <CardTitle>Conversation Transcript</CardTitle>
               </CardHeader>
-              <CardContent className="space-y-2 text-sm">
-                <div className="flex justify-between">
-                  <span>Connection:</span>
-                  <Badge variant={isConnected ? "default" : "secondary"}>
-                    {isConnected ? "Connected" : "Connecting..."}
-                  </Badge>
-                </div>
-                <div className="flex justify-between">
-                  <span>Microphone:</span>
-                  <Badge variant={isMicOn ? "default" : "outline"}>
-                    {isMicOn ? "On" : "Off"}
-                  </Badge>
-                </div>
-                <div className="flex justify-between">
-                  <span>Interview:</span>
-                  <Badge variant={interviewStarted ? "default" : "outline"}>
-                    {interviewStarted ? "In Progress" : "Not Started"}
-                  </Badge>
-                </div>
-                <div className="flex justify-between">
-                  <span>Screen Share:</span>
-                  <Badge variant={isScreenSharing ? "default" : "outline"}>
-                    {isScreenSharing ? "Active" : "Off"}
-                  </Badge>
+              <CardContent>
+                <div className="space-y-2 max-h-64 overflow-y-auto">
+                  {transcript.map((text, index) => (
+                    <div key={index} className="text-sm p-2 bg-muted rounded">
+                      {text}
+                    </div>
+                  ))}
                 </div>
               </CardContent>
             </Card>
-          </motion.div>
+          )}
+        </div>
+
+        {/* Right: Interview Info */}
+        <div className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Your Assessment</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div>
+                <div className="text-2xl font-bold text-center mb-2">
+                  {assessmentResult.score}/100
+                </div>
+                <Progress value={assessmentResult.score} className="h-2" />
+              </div>
+
+              <div>
+                <h4 className="text-sm font-medium mb-2 text-green-600">✅ Strengths</h4>
+                <ul className="text-xs space-y-1">
+                  {assessmentResult.strengths.map((strength, index) => (
+                    <li key={index} className="text-muted-foreground">• {strength}</li>
+                  ))}
+                </ul>
+              </div>
+
+              <div>
+                <h4 className="text-sm font-medium mb-2 text-orange-600">🎯 Focus Areas</h4>
+                <ul className="text-xs space-y-1">
+                  {assessmentResult.improvements.map((improvement, index) => (
+                    <li key={index} className="text-muted-foreground">• {improvement}</li>
+                  ))}
+                </ul>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Interview Tips</CardTitle>
+            </CardHeader>
+            <CardContent className="text-xs space-y-2 text-muted-foreground">
+              <p>• Speak clearly and at a natural pace</p>
+              <p>• Think before you answer</p>
+              <p>• Ask for clarification if needed</p>
+              <p>• Be specific with examples</p>
+              <p>• Stay calm and confident</p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Expected Questions</CardTitle>
+            </CardHeader>
+            <CardContent className="text-xs space-y-2">
+              <Badge variant="outline" className="text-xs">Technical Knowledge</Badge>
+              <Badge variant="outline" className="text-xs">Problem Solving</Badge>
+              <Badge variant="outline" className="text-xs">Behavioral</Badge>
+              <Badge variant="outline" className="text-xs">Experience</Badge>
+            </CardContent>
+          </Card>
         </div>
       </div>
     </div>

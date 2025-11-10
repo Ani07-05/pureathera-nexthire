@@ -11,56 +11,45 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Create Anam.ai session token using new API
-    const anamApiKey = process.env.ANAM_API_KEY
+    const vapiPublicKey = process.env.VAPI_PUBLIC_API_KEY
 
-    if (!anamApiKey) {
+    if (!vapiPublicKey) {
       return NextResponse.json(
-        { error: 'Anam API key not configured' },
+        { error: 'Vapi API key not configured' },
         { status: 500 }
       )
     }
 
-    // Call Anam.ai session token API
-    const anamResponse = await fetch('https://api.anam.ai/v1/auth/session-token', {
+    // Create Vapi assistant for this interview session
+    const assistantResponse = await fetch(`${request.nextUrl.origin}/api/vapi/assistant`, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${anamApiKey}`,
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({
-        clientLabel: `interview-${userId}`,
-        personaConfig: {
-          name: "Alex",
-          avatarId: "30fa96d0-26c4-4e55-94a0-517025942e18",
-          voiceId: "6bfbe25a-979d-40f3-a92b-5394170af54b",
-          brainType: "ANAM_GPT_4O_MINI_V1",
-          systemPrompt: `You are an experienced ${role} interviewer conducting a technical interview at ${level} level. Ask thoughtful questions, provide constructive feedback, and maintain a professional yet friendly demeanor. Focus on technical skills, problem-solving abilities, and relevant experience.`,
-          maxSessionLengthSeconds: 1800 // 30 minutes
-        }
-      })
+      body: JSON.stringify({ role, level })
     })
 
-    if (!anamResponse.ok) {
-      const errorText = await anamResponse.text()
-      console.error('Anam API error:', errorText)
+    if (!assistantResponse.ok) {
+      const errorText = await assistantResponse.text()
+      console.error('Failed to create Vapi assistant:', errorText)
       return NextResponse.json(
-        { error: 'Failed to create Anam session' },
+        { error: 'Failed to create interview assistant' },
         { status: 500 }
       )
     }
 
-    const anamData = await anamResponse.json()
+    const assistantData = await assistantResponse.json()
 
     return NextResponse.json({
       success: true,
-      sessionToken: anamData.sessionToken,
-      sessionId: `anam_session_${Date.now()}`,
+      assistantId: assistantData.assistantId,
+      publicKey: assistantData.publicKey,
+      sessionId: `vapi_session_${Date.now()}`,
       metadata: {
         role,
         level,
         userId,
-        clientLabel: `interview-${userId}`
+        provider: 'vapi'
       }
     })
   } catch (error) {
@@ -74,7 +63,7 @@ export async function POST(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   try {
-    const { sessionId } = await request.json()
+    const { sessionId, assistantId } = await request.json()
 
     if (!sessionId) {
       return NextResponse.json(
@@ -83,9 +72,25 @@ export async function DELETE(request: NextRequest) {
       )
     }
 
-    // For Azure sessions, cleanup is handled client-side
-    // This endpoint is mainly for logging/tracking purposes
-    console.log(`Ending Azure avatar session: ${sessionId}`)
+    // For Vapi sessions, cleanup is handled client-side
+    // Optionally delete the assistant if provided
+    if (assistantId) {
+      try {
+        await fetch(`${request.nextUrl.origin}/api/vapi/assistant`, {
+          method: 'DELETE',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ assistantId })
+        })
+        console.log(`Deleted Vapi assistant: ${assistantId}`)
+      } catch (error) {
+        console.error('Failed to delete assistant:', error)
+        // Non-critical, continue anyway
+      }
+    }
+
+    console.log(`Ending Vapi interview session: ${sessionId}`)
 
     return NextResponse.json({
       success: true,

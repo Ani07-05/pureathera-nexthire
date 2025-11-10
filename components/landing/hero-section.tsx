@@ -73,13 +73,13 @@ export function HeroSection() {
             transition={{ duration: 0.8, delay: 0.6 }}
             className="flex flex-col sm:flex-row gap-4 justify-center mb-12"
           >
-            <Button size="lg" className="text-lg px-8 py-6 group">
+            {/* <Button size="lg" className="text-lg px-8 py-6 group">
               Start Your Journey
               <ArrowRight className="ml-2 h-5 w-5 transition-transform group-hover:translate-x-1" />
-            </Button>
-            <Button variant="outline" size="lg" className="text-lg px-8 py-6 bg-transparent">
+            </Button> */}
+            {/* <Button variant="outline" size="lg" className="text-lg px-8 py-6 bg-transparent">
               For Recruiters
-            </Button>
+            </Button> */}
           </motion.div>
 
           <motion.div
@@ -90,11 +90,9 @@ export function HeroSection() {
           >
             <div className="flex items-center justify-center gap-3 text-muted-foreground">
               <CheckCircle className="h-5 w-5 text-accent" />
-              <span>AI-Powered Matching</span>
             </div>
             <div className="flex items-center justify-center gap-3 text-muted-foreground">
               <Users className="h-5 w-5 text-accent" />
-              <span>Transparent Process</span>
             </div>
             <div className="flex items-center justify-center gap-3 text-muted-foreground">
               <Target className="h-5 w-5 text-accent" />
